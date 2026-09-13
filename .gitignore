@@ -1,0 +1,31 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDEs & editors
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Scraped raw match data & logs (16GB+ raw HTML match cache)
+data/raw/
+data/logs/
+*.log
+
+# Temporary test databases
+data/processed/test*.db
+data/processed/*_test.db
