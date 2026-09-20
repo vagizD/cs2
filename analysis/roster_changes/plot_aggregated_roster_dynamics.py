@@ -100,7 +100,9 @@ def compute_team_level_panel_dynamics(
     conn: sqlite3.Connection,
     events: List[Dict],
     isolation_days: int = 90,
-    min_matches: int = 3,
+    min_matches: int = 15,
+    min_matches_per_window: int = 2,
+    min_matches_mode: str = "total",
     mode: str = "raw",
     event_tier: Optional[str] = "Tier 1",
     window_type: str = "trailing",
@@ -112,6 +114,9 @@ def compute_team_level_panel_dynamics(
     then computes the cross-team mean and Standard Error of the Mean (SEM) for robust 95% CI.
     
     Args:
+        min_matches: Minimum matches required.
+        min_matches_per_window: Minimum matches inside each 14-day window for team inclusion.
+        min_matches_mode: 'total' (pre + post >= min_matches with pre,post >= 3) or 'each' (pre >= min_matches and post >= min_matches).
         event_tier: Filter matches by event tier ('Tier 1', 'Tier 2', 'Qualifier', or 'all').
         window_type: 'trailing' (looks back window_days from week w) or 'centered' (symmetric around week w).
         window_days: duration in days for each evaluation window (e.g. 14 for 2 weeks, 21 for 3 weeks).
@@ -177,7 +182,12 @@ def compute_team_level_panel_dynamics(
         m_pre = m_team[(m_team["rel_days"] >= -isolation_days) & (m_team["rel_days"] < 0)]
         m_post = m_team[(m_team["rel_days"] >= 0) & (m_team["rel_days"] <= isolation_days)]
         
-        if len(m_pre) >= min_matches and len(m_post) >= min_matches:
+        if min_matches_mode == "total":
+            is_qualified = (len(m_pre) + len(m_post) >= min_matches) and (len(m_pre) >= 3 and len(m_post) >= 3)
+        else:
+            is_qualified = (len(m_pre) >= min_matches and len(m_post) >= min_matches)
+        
+        if is_qualified:
             qualified_events.append(ev)
             total_match_count += (len(m_pre) + len(m_post))
             
@@ -196,7 +206,7 @@ def compute_team_level_panel_dynamics(
                 w_matches = m_team[(m_team["rel_days"] >= day_start) & (m_team["rel_days"] <= day_end)]
                 w_pstats = sub_p[(sub_p["rel_days"] >= day_start) & (sub_p["rel_days"] <= day_end)]
                 
-                if len(w_matches) > 0:
+                if len(w_matches) >= min_matches_per_window:
                     wins = ((w_matches["team1_id"] == tid) & (w_matches["team1_score"] > w_matches["team2_score"])).sum() + \
                            ((w_matches["team2_id"] == tid) & (w_matches["team2_score"] > w_matches["team1_score"])).sum()
                     wr = wins / len(w_matches) * 100.0
@@ -360,7 +370,9 @@ def compute_success_distribution(
 def plot_aggregated_roster_dynamics(
     db_path: str = "data/processed/hltv_database.db",
     isolation_days: int = 90,
-    min_matches: int = 3,
+    min_matches: int = 15,
+    min_matches_per_window: int = 2,
+    min_matches_mode: str = "total",
     cohort: str = "top30",
     mode: str = "raw",
     event_tier: Optional[str] = "Tier 1",
@@ -380,12 +392,14 @@ def plot_aggregated_roster_dynamics(
     print(f"[1/4] Detecting isolated roster changes ({isolation_days}d clean window, cohort={cohort})...")
     events = detect_isolated_roster_changes(conn, isolation_days=isolation_days, top30_only=(cohort == "top30"))
     
-    print(f"[2/4] Computing team-level panel dynamics (tier={tier_label}, window={window_type} {window_days}d, min_matches={min_matches}, mode={mode})...")
+    print(f"[2/4] Computing team-level panel dynamics (tier={tier_label}, window={window_type} {window_days}d, min_matches={min_matches} [{min_matches_mode}], min_matches_per_window={min_matches_per_window}, mode={mode})...")
     events_df, df_summary, k_events, tot_matches = compute_team_level_panel_dynamics(
         conn=conn,
         events=events,
         isolation_days=isolation_days,
         min_matches=min_matches,
+        min_matches_per_window=min_matches_per_window,
+        min_matches_mode=min_matches_mode,
         mode=mode,
         event_tier=event_tier,
         window_type=window_type,
@@ -479,49 +493,54 @@ def plot_aggregated_roster_dynamics(
     
     # Annotations:
     # 1. Drop in pre-change weeks
-    min_pre_w = df_summary.loc[(df_summary["week"] >= -4) & (df_summary["week"] <= 0), "win_rate"].idxmin()
-    slump_w = df_summary.loc[min_pre_w, "week"]
-    slump_val = df_summary.loc[min_pre_w, "win_rate"]
-    ax1.annotate(
-        "Pre-Change Drop\n(Benched player notified)",
-        xy=(slump_w, slump_val),
-        xytext=(slump_w - 3.8, slump_val + 1.5),
-        arrowprops=dict(arrowstyle="->", color="#FFA657", lw=1.5),
-        color="#FFA657",
-        fontsize=9,
-        fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#FFA657", alpha=0.85)
-    )
+    pre_candidates = df_summary.loc[(df_summary["week"] >= -4) & (df_summary["week"] <= 0) & df_summary["win_rate"].notnull()]
+    if not pre_candidates.empty:
+        min_pre_w = pre_candidates["win_rate"].idxmin()
+        slump_w = df_summary.loc[min_pre_w, "week"]
+        slump_val = df_summary.loc[min_pre_w, "win_rate"]
+        ax1.annotate(
+            "Pre-Change Drop\n(Benched player notified)",
+            xy=(slump_w, slump_val),
+            xytext=(slump_w - 3.8, slump_val + 1.5),
+            arrowprops=dict(arrowstyle="->", color="#FFA657", lw=1.5),
+            color="#FFA657",
+            fontsize=9,
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#FFA657", alpha=0.85)
+        )
     
     # 2. Adaptation Period (weeks 1 to 4)
-    adapt_sub = df_summary[(df_summary["week"] >= 1) & (df_summary["week"] <= 4)]
-    adapt_mean = adapt_sub["win_rate"].mean()
-    ax1.annotate(
-        "Adaptation Period\n(Monotonic climb)",
-        xy=(2, adapt_sub.loc[adapt_sub["week"] == 2, "win_rate"].values[0]),
-        xytext=(2.2, 25.5),
-        arrowprops=dict(arrowstyle="->", color="#E3B341", lw=1.5),
-        color="#E3B341",
-        fontsize=9,
-        fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#E3B341", alpha=0.85)
-    )
+    adapt_sub = df_summary[(df_summary["week"] >= 1) & (df_summary["week"] <= 4) & df_summary["win_rate"].notnull()]
+    if not adapt_sub.empty:
+        adapt_w = 2 if 2 in adapt_sub["week"].values else adapt_sub["week"].iloc[0]
+        adapt_val = adapt_sub.loc[adapt_sub["week"] == adapt_w, "win_rate"].values[0]
+        ax1.annotate(
+            "Adaptation Period\n(Initial disruption)",
+            xy=(adapt_w, adapt_val),
+            xytext=(adapt_w + 0.2, 25.5),
+            arrowprops=dict(arrowstyle="->", color="#E3B341", lw=1.5),
+            color="#E3B341",
+            fontsize=9,
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#E3B341", alpha=0.85)
+        )
     
-    # 3. Peak Settled Period (weeks 7-9)
-    peak_sub = df_summary[(df_summary["week"] >= 6) & (df_summary["week"] <= 10)]
-    max_peak_idx = peak_sub["win_rate"].idxmax()
-    peak_w = peak_sub.loc[max_peak_idx, "week"]
-    peak_val = peak_sub.loc[max_peak_idx, "win_rate"]
-    ax1.annotate(
-        "Settled Chemistry Peak\n(~50–60 days)",
-        xy=(peak_w, peak_val),
-        xytext=(peak_w - 1.5, peak_val + 5.5),
-        arrowprops=dict(arrowstyle="->", color="#3FB950", lw=1.5),
-        color="#3FB950",
-        fontsize=9,
-        fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#3FB950", alpha=0.85)
-    )
+    # 3. Peak Settled Period (weeks 6-10)
+    peak_sub = df_summary[(df_summary["week"] >= 6) & (df_summary["week"] <= 10) & df_summary["win_rate"].notnull()]
+    if not peak_sub.empty:
+        max_peak_idx = peak_sub["win_rate"].idxmax()
+        peak_w = peak_sub.loc[max_peak_idx, "week"]
+        peak_val = peak_sub.loc[max_peak_idx, "win_rate"]
+        ax1.annotate(
+            "Settled Chemistry Peak\n(~50–60 days)",
+            xy=(peak_w, peak_val),
+            xytext=(peak_w - 1.5, min(peak_val + 5.5, 75.0)),
+            arrowprops=dict(arrowstyle="->", color="#3FB950", lw=1.5),
+            color="#3FB950",
+            fontsize=9,
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D", edgecolor="#3FB950", alpha=0.85)
+        )
     
     ax1.set_ylabel("Match Win Rate, %", color="#F0F6FC", fontsize=12, fontweight="bold", labelpad=8)
     ax1.set_xlabel("Weeks from Roster Change", color="#F0F6FC", fontsize=12, fontweight="bold", labelpad=8)
@@ -660,7 +679,7 @@ def plot_aggregated_roster_dynamics(
     
     fig.suptitle(
         "Roster Change Impact\n"
-        "Top 30 Teams in Tier 1 Events | ±90 Days Period | 14-Day Statistics Window (95% CI)",
+        f"Top 30 Teams in Tier 1 Events | ±90 Days Period | 14-Day Window (min {min_matches_per_window} matches/window, 95% CI)",
         fontsize=15,
         fontweight="bold",
         color="#F0F6FC",
@@ -682,7 +701,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregated Roster Change Event Study Plot.")
     parser.add_argument("--db-path", type=str, default="data/processed/hltv_database.db", help="Path to database.")
     parser.add_argument("--isolation-days", type=int, default=90, help="Clean window days before and after change (default 90).")
-    parser.add_argument("--min-matches", type=int, default=3, help="Minimum matches threshold in pre and post periods (default 3).")
+    parser.add_argument("--min-matches", type=int, default=15, help="Minimum matches threshold (default 15).")
+    parser.add_argument("--min-matches-mode", choices=["total", "each"], default="total", help="Mode for min matches: 'total' across 180d or 'each' (pre & post).")
+    parser.add_argument("--min-matches-per-window", type=int, default=2, help="Minimum matches per 14-day statistics window to include team (default 2).")
     parser.add_argument("--cohort", choices=["top30", "all"], default="top30", help="Cohort filter: 'top30' or 'all'.")
     parser.add_argument("--event-tier", type=str, default="Tier 1", help="Event tier filter ('Tier 1', 'Tier 2', 'Qualifier', 'all').")
     parser.add_argument("--mode", choices=["raw", "normalized"], default="raw", help="Rating mode: 'raw' or 'normalized'.")
@@ -699,6 +720,8 @@ if __name__ == "__main__":
         db_path=args.db_path,
         isolation_days=args.isolation_days,
         min_matches=args.min_matches,
+        min_matches_per_window=args.min_matches_per_window,
+        min_matches_mode=args.min_matches_mode,
         cohort=args.cohort,
         event_tier=args.event_tier,
         mode=args.mode,
