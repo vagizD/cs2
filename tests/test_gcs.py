@@ -16,7 +16,7 @@ def storage_mock():
     data = Mock(generation=123)
     metadata = Mock()
     client = Mock()
-    client.bucket.return_value.blob.side_effect = [data, metadata]
+    client.bucket.return_value.blob.side_effect = [metadata, data]
     return client, data, metadata
 
 
@@ -63,6 +63,7 @@ def test_download_pins_generation_and_verifies_hash(temporal_db, tmp_path, corru
                 handle.write(b"unexpected bytes")
 
     data.download_to_filename.side_effect = transfer
+    key = f"snapshots/{VERSION}/hltv_database.db"
     destination = tmp_path / "download" / "hltv_database.db"
     if corrupt:
         with pytest.raises(ValueError, match="Snapshot manifest mismatch for sha256"):
@@ -73,6 +74,7 @@ def test_download_pins_generation_and_verifies_hash(temporal_db, tmp_path, corru
         assert download_snapshot(destination, URI, VERSION, client) == published
         assert destination.read_bytes() == temporal_db.read_bytes()
         assert manifest_path(destination).is_file()
+    client.bucket.return_value.blob.assert_called_with(key, generation=123)
 
 
 def test_published_snapshot_integration(tmp_path):

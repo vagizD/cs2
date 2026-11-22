@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
+from google.cloud.storage.bucket import Bucket
 
 from ml.snapshot import (
     Snapshot,
@@ -18,9 +19,7 @@ from ml.snapshot import (
 )
 
 
-def snapshot_blobs(client: storage.Client, uri: str | None, version: str):
-    if not uri:
-        raise ValueError("Set GCS_URI to gs://BUCKET/snapshots/VERSION/hltv_database.db.")
+def snapshot_location(client: storage.Client, uri: str, version: str) -> tuple[Bucket, str]:
     parsed = urlsplit(uri)
     key = parsed.path.lstrip("/")
     parts = key.split("/")
@@ -30,15 +29,16 @@ def snapshot_blobs(client: storage.Client, uri: str | None, version: str):
         or any(part in {"", ".", ".."} for part in parts)
     ):
         raise ValueError("GCS_URI must end in /<snapshot_version>/hltv_database.db.")
-    bucket = client.bucket(parsed.netloc)
-    return bucket.blob(key), bucket.blob(key + ".manifest.json")
+    return client.bucket(parsed.netloc), key
 
 
 def upload_snapshot(path: Path, uri: str | None, version: str, client=None) -> Snapshot:
     snapshot = inspect_snapshot(path, version)
     if not uri:
         raise ValueError("Set GCS_URI before uploading a snapshot.")
-    data_blob, manifest_blob = snapshot_blobs(client or storage.Client(), uri, version)
+    bucket, key = snapshot_location(client or storage.Client(), uri, version)
+    manifest_blob = bucket.blob(key + ".manifest.json")
+    data_blob = bucket.blob(key)
     with tempfile.TemporaryDirectory() as workspace:
         copy = Path(workspace) / path.name
         shutil.copyfile(path, copy)
@@ -75,7 +75,8 @@ def upload_snapshot(path: Path, uri: str | None, version: str, client=None) -> S
 def download_snapshot(path: Path, uri: str | None, version: str, client=None) -> Snapshot:
     if not uri:
         raise ValueError("Set GCS_URI before downloading a snapshot.")
-    data_blob, manifest_blob = snapshot_blobs(client or storage.Client(), uri, version)
+    bucket, key = snapshot_location(client or storage.Client(), uri, version)
+    manifest_blob = bucket.blob(key + ".manifest.json")
     manifest = Snapshot.model_validate_json(manifest_blob.download_as_bytes())
     if (manifest.snapshot_version != version or manifest.gcs_uri != uri
             or manifest.gcs_generation is None):
@@ -88,7 +89,7 @@ def download_snapshot(path: Path, uri: str | None, version: str, client=None) ->
         if path.exists():
             validate_snapshot(path, manifest)
         else:
-            data_blob.generation = manifest.gcs_generation
+            data_blob = bucket.blob(key, generation=manifest.gcs_generation)
             data_blob.download_to_filename(
                 str(staged), if_generation_match=manifest.gcs_generation
             )
