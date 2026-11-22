@@ -115,7 +115,14 @@ The September 8, 2026 snapshot contains 17,821 raw match records. The training s
 | GCS object generation | `1795310306177997` |
 | SQLite SHA-256 | `9dc4989cba70c3d78ca650925fb7db625004784b8a6d9859d9818a05abf5fa00` |
 
-Use `data/processed/hltv_database.db` from Git for the no-credentials Docker run. To independently verify the cloud copy, authorized readers can set `GCS_URI` to the object above, install `requirements/training.txt`, authenticate with Application Default Credentials, and run `python -m scripts.download_data`. The downloader checks the manifest, generation, and SHA-256.
+Use `data/processed/hltv_database.db` from Git for the no-credentials Docker run. To check the private cloud copy, install `requirements/training.txt` in a Python 3.12 virtual environment and run the following with a Google account that can read the bucket. The downloader verifies the generation and SHA-256 against the manifest.
+
+```bash
+export GOOGLE_CLOUD_PROJECT=project-197ba5d4-68d9-4ad8-89e
+export GCS_URI=gs://cs2_dataset/snapshots/hltv-2026-09-08/hltv_database.db
+gcloud auth application-default login
+python -m scripts.download_data
+```
 
 Maintainers with access to the provisioned project can submit training and API deployment with just a remote branch and a snapshot version. The command returns the Cloud Build ID and the release continues in Google Cloud.
 
@@ -124,6 +131,8 @@ export GCP_PROJECT=project-197ba5d4-68d9-4ad8-89e
 export CS2_SNAPSHOT_BUCKET=cs2_dataset
 bash scripts/release_cloud.sh cloud-mlops hltv-2026-09-08
 ```
+
+The reference cloud run `30bbfc814ec745b79de57dd16eaf2823` matched the Docker feature checksum, all eight evaluation metrics, and the example prediction. Its serialized export has its own model version, `logreg-88029a3040c3ce1a`. [Training source commit](https://github.com/vagizD/cs2/commit/98d725893ce378487f2a8728de8fb6755906c2d8) · [Cloud Build rollout verification](https://console.cloud.google.com/cloud-build/builds;region=us-central1/76b8d077-4c10-4a69-83a1-125921f8f631?project=896802243269)
 
 To refresh the data, build a fresh SQLite file locally and run `python -m scripts.upload_snapshot` with `DATABASE_PATH` pointing to it, a new `SNAPSHOT_VERSION`, and its matching `GCS_URI`. Then submit a release for that version. The uploader creates a new database object and manifest. The Streamlit service keeps calling the same API URL as new revisions are promoted.
 
@@ -134,6 +143,24 @@ gcloud run services proxy cs2-mlflow --project "$GCP_PROJECT" --region us-centra
 ```
 
 Open [MLflow on localhost](http://127.0.0.1:5000) and select **cs2-match-predictor**. For one-time provisioning in another project, prepare an Artifact Registry repository, a snapshot bucket, and the initial predictor using `scripts/deploy_api.sh`. Then run `scripts/setup_cloud_mlops.sh` to provision the private tracking service and release identities. The Cloud SQL instance incurs charges while it runs.
+
+<details>
+<summary>Deploy a Streamlit code update</summary>
+
+From a clean checkout of the committed app changes, build the new image and update the provisioned Streamlit service. Its `API_BASE_URL` is already configured.
+
+```bash
+region=us-central1
+image="$region-docker.pkg.dev/$GCP_PROJECT/cs2-predictor/cs2-streamlit:git-$(git rev-parse --short=12 HEAD)"
+gcloud builds submit app --config deploy/build-image.yaml \
+  --project "$GCP_PROJECT" --region "$region" \
+  --service-account "projects/$GCP_PROJECT/serviceAccounts/cs2-cloud-build@$GCP_PROJECT.iam.gserviceaccount.com" \
+  --gcs-source-staging-dir "gs://$GCP_PROJECT-cs2-releases/build-source" \
+  --substitutions "_IMAGE=$image"
+gcloud run services update cs2-streamlit --project "$GCP_PROJECT" --region "$region" --image "$image"
+```
+
+</details>
 
 ## Limitations and source
 

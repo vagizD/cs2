@@ -19,6 +19,12 @@ image_root="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT/$GCP_ARTIFACT_REPOSITORY"
 commit="$(cat /workspace/commit)"
 region_flags=(--project "$GCP_PROJECT" --region "$GCP_REGION" --quiet)
 release_inputs="SNAPSHOT_VERSION=$SNAPSHOT_VERSION,GCS_URI=$GCS_URI,MODEL_BUNDLE_URI=$MODEL_BUNDLE_URI"
+# The Cloud SDK image bundles Python outside PATH.
+python_bin="$(gcloud info --format='value(basic.python_location)')"
+if [[ ! -x "$python_bin" ]]; then
+    printf 'Could not locate the Cloud SDK Python interpreter.\n' >&2
+    exit 1
+fi
 
 image_digest() {
     local name="$1" digest
@@ -58,7 +64,7 @@ gcloud run deploy "$service" "${region_flags[@]}" \
     --startup-probe 'httpGet.path=/health,httpGet.port=8080,periodSeconds=5,timeoutSeconds=4,failureThreshold=20'
 
 candidate="$(gcloud run services describe "$service" "${region_flags[@]}" --format=json |
-    python3 -c '
+    "$python_bin" -c '
 import json, sys
 traffic = json.load(sys.stdin)["status"]["traffic"]
 entry = next(item for item in traffic if item.get("tag") == sys.argv[1])
@@ -66,14 +72,14 @@ print(entry["revisionName"], entry["url"])
 ' "$preview_tag")"
 read -r revision candidate_url <<<"$candidate"
 smoke_args=(--wait-seconds 90 --snapshot-version "$SNAPSHOT_VERSION" --git-commit "$commit")
-candidate_check="$(python3 -m scripts.smoke_api "$candidate_url" "${smoke_args[@]}")"
+candidate_check="$("$python_bin" -m scripts.smoke_api "$candidate_url" "${smoke_args[@]}")"
 printf '%s\n' "$candidate_check"
-run_id="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["health"]["mlflow_run_id"])' <<<"$candidate_check")"
+run_id="$("$python_bin" -c 'import json, sys; print(json.load(sys.stdin)["health"]["mlflow_run_id"])' <<<"$candidate_check")"
 if [[ ! "$run_id" =~ ^[a-f0-9]{32}$ ]]; then
     printf 'Candidate version has no recorded MLflow run.\n' >&2
     exit 1
 fi
 gcloud run services update-traffic "$service" "${region_flags[@]}" \
     --to-revisions "$revision=100" --remove-tags "$preview_tag"
-python3 -m scripts.smoke_api "$service_url" "${smoke_args[@]}" --mlflow-run-id "$run_id"
+"$python_bin" -m scripts.smoke_api "$service_url" "${smoke_args[@]}" --mlflow-run-id "$run_id"
 printf 'Verified release %s from %s at %s\n' "$revision" "$commit" "$service_url"
