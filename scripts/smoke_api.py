@@ -4,7 +4,6 @@ import argparse
 import json
 import math
 from time import monotonic, sleep
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
@@ -22,7 +21,7 @@ def smoke(base_url, wait_seconds=0, team_ids=None):
         try:
             health = read_json(f"{base_url}/health")
             break
-        except (URLError, TimeoutError):
+        except OSError:
             if monotonic() >= deadline:
                 raise
             sleep(min(1, max(0, deadline - monotonic())))
