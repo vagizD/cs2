@@ -5,3 +5,5 @@ lxml==6.0.2
 pytest==8.4.2
 curl-cffi==0.13.0
 nodriver==0.48.1
+
+-r ../app/requirements.txt
