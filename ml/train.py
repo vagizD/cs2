@@ -1,5 +1,6 @@
 """Fit a deterministic sklearn pipeline and record the run in MLflow."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -53,10 +54,12 @@ def read_dataset(config: Config) -> tuple[pd.DataFrame, Snapshot, str]:
         raise ValueError("Dataset does not come from the configured GCS URI. Build with --source gcs.")
 
     csv = directory / "features.csv"
-    digest = sha256_file(csv)
-    if digest != metadata["features_sha256"]:
-        raise ValueError("Dataset checksum mismatch. Rebuild the dataset.")
-    frame = pd.read_csv(csv, float_precision="round_trip")
+    with csv.open("rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        if digest != metadata["features_sha256"]:
+            raise ValueError("Dataset checksum mismatch. Rebuild the dataset.")
+        handle.seek(0)
+        frame = pd.read_csv(handle, float_precision="round_trip")
     if (tuple(frame.columns) != CONTEXT_COLUMNS + FEATURE_COLUMNS + (TARGET_COLUMN,)
             or len(frame) != metadata["rows"]
             or not frame["example_id"].is_unique

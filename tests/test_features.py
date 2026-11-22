@@ -34,6 +34,16 @@ def test_point_in_time_parity_and_canonical_labels(temporal_db):
     assert feature_matrix(training).dtypes.equals(feature_matrix(inference).dtypes)
 
 
+@pytest.mark.parametrize("timestamp", [
+    "2026-01-10 13:00:00+00:00",
+    "2026-01-10 13:00:00.001",
+    "2026-01-10T13:00:00",
+])
+def test_inference_rejects_timestamps_with_different_sql_ordering(temporal_db, timestamp):
+    with pytest.raises(ValueError, match="YYYY-MM-DD HH:MM:SS"):
+        inference_examples(temporal_db, [(4494, 9565)], timestamp, (30, 90))
+
+
 def test_bundled_snapshot_and_sql_smoke():
     if not BUNDLED_DB.is_file():
         pytest.skip("Bundled SQLite snapshot is absent.")

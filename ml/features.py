@@ -85,7 +85,8 @@ def inference_examples(
     as_of_utc: str,
     lookbacks: tuple[int, int],
 ) -> pd.DataFrame:
-    if datetime.fromisoformat(as_of_utc).isoformat(sep=" ") != as_of_utc:
+    timestamp = datetime.fromisoformat(as_of_utc)
+    if timestamp.strftime("%Y-%m-%d %H:%M:%S") != as_of_utc:
         raise ValueError("Expected a UTC timestamp formatted as YYYY-MM-DD HH:MM:SS.")
     contexts = [
         (-index, min(team_a, team_b), max(team_a, team_b), as_of_utc)
