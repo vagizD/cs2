@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!requirements.txt
+!streamlit_app.py
+!bracket.py
+!bracket.css

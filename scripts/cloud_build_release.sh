@@ -13,7 +13,8 @@ set -euo pipefail
 
 service=cs2-predictor
 training_job="cs2-train-$RELEASE"
-preview_tag="check-$RELEASE"
+release_id="${RELEASE//-/}"
+preview_tag="check-${release_id:0:24}"
 image_root="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT/$GCP_ARTIFACT_REPOSITORY"
 commit="$(cat /workspace/commit)"
 region_flags=(--project "$GCP_PROJECT" --region "$GCP_REGION" --quiet)

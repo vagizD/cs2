@@ -32,7 +32,7 @@ describe_image() {
         --format='value(image_summary.digest)' --quiet
 }
 if ! digest="$(describe_image 2>/dev/null)" || [[ -z "$digest" ]]; then
-    gcloud builds submit deploy/mlflow --config deploy/mlflow/cloudbuild.yaml \
+    gcloud builds submit deploy/mlflow --config deploy/build-image.yaml \
         --project "$GCP_PROJECT" --region "$region" --suppress-logs \
         --service-account "projects/$GCP_PROJECT/serviceAccounts/$build_identity" \
         --gcs-source-staging-dir "gs://$release_bucket/build-source" \
