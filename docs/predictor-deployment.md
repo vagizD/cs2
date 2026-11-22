@@ -80,7 +80,16 @@ With `SNAPSHOT_VERSION` set to the downloaded version and the environment still 
 bash scripts/deploy_api.sh
 ```
 
-The script verifies the serving snapshot and artifact, builds a Linux AMD64 image, pushes it to Artifact Registry, and deploys the exact image digest. The service uses one CPU, 512 MiB memory, a concurrency limit of eight, and zero to two instances. It uses the supported public access flag `--no-invoker-iam-check` and calls the API over HTTPS without credentials to verify readiness, team availability, prediction normalization, and reversal. An organization policy can block public access. [Cloud Run public access](https://docs.cloud.google.com/run/docs/authenticating/public), [CLI deployment reference](https://docs.cloud.google.com/sdk/gcloud/reference/run/deploy)
+The script verifies the serving snapshot and model, builds a Linux AMD64 image in local Docker, and deploys the exact digest from Artifact Registry. The service uses one CPU, 512 MiB memory, a concurrency limit of eight, and zero to two instances. It uses the supported public access flag `--no-invoker-iam-check` and calls the API over HTTPS without credentials to verify readiness, team availability, prediction normalization, and reversal. An organization policy can block public access. [Cloud Run public access](https://docs.cloud.google.com/run/docs/authenticating/public), [CLI deployment reference](https://docs.cloud.google.com/sdk/gcloud/reference/run/deploy)
+
+If your connection is intermittent, prepare the image first. Upload and deploy it when the connection is stable.
+
+```bash
+bash scripts/deploy_api.sh prepare
+bash scripts/deploy_api.sh deploy
+```
+
+The prepared image persists in the local Docker image store. If the upload is interrupted, rerun only `deploy`. The script uses the same tag for the same local image and checks Artifact Registry for the digest before pushing. Image preparation uses cached dependencies when available. A cold Docker cache needs network access to fetch dependencies.
 
 Record the verified API URL and snapshot URI in the README. If the account requires a separate review, share the GCS object URI and manifest with the reviewer using approved bucket read access.
 
