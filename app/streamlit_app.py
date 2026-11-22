@@ -1,7 +1,10 @@
 import os
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from html import escape
 from itertools import combinations
+from pathlib import Path
+from time import sleep
 from urllib.parse import urlsplit
 
 import requests
@@ -11,6 +14,10 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from bracket import BRACKET_SIZE, ROUND_NAMES, BracketPrediction, bracket_predictions
 
 TIMEOUT = (3.05, 10)
+BRACKET_TIMEOUT = (5, 35)
+BRACKET_WORKERS = 4
+RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+BRACKET_STYLES = Path(__file__).with_name("bracket.css")
 VERSION_FIELDS = ("as_of_utc", "data_snapshot_version", "model_version")
 
 
@@ -28,15 +35,17 @@ def backend_url() -> str:
     return base
 
 
-def request_json(base_url, method, endpoint, **kwargs):
-    response = requests.request(method, f"{base_url}{endpoint}", timeout=TIMEOUT, **kwargs)
+def request_json(base_url, method, endpoint, *, session=None, timeout=TIMEOUT, **kwargs):
+    send = session.request if session else requests.request
+    response = send(method, f"{base_url}{endpoint}", timeout=timeout, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
-def matchup(base_url, team_a, team_b):
+def matchup(base_url, team_a, team_b, **request_options):
     return request_json(
-        base_url, "POST", "/predict", json={"team_a_id": team_a, "team_b_id": team_b}
+        base_url, "POST", "/predict",
+        json={"team_a_id": team_a, "team_b_id": team_b}, **request_options,
     )
 
 
@@ -77,61 +86,73 @@ def show_match_form(base_url, team_ids, label):
     show_provenance(prediction)
 
 
+def fetch_bracket_matchup(base_url, pair, session):
+    # Predictions are read-only. Retry a transient failure once on the same submission.
+    for attempt in range(2):
+        try:
+            prediction = matchup(base_url, *pair, session=session, timeout=BRACKET_TIMEOUT)
+        except requests.HTTPError as exc:
+            if attempt or exc.response.status_code not in RETRYABLE_STATUS:
+                raise
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt:
+                raise
+        else:
+            if (prediction["team_a_id"], prediction["team_b_id"]) != pair:
+                raise ValueError("The API returned a different matchup.")
+            return prediction
+        sleep(0.4)
+
+
 def fetch_bracket(base_url, teams):
-    def fetch_pair(pair):
-        prediction = matchup(base_url, *pair)
-        if (prediction["team_a_id"], prediction["team_b_id"]) != pair:
-            raise ValueError("The API returned a different matchup.")
-        return prediction
+    def fetch_chunk(pairs):
+        with requests.Session() as session:
+            return {pair: fetch_bracket_matchup(base_url, pair, session) for pair in pairs}
 
     pairs = list(combinations(sorted(teams), 2))
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        predictions = list(pool.map(fetch_pair, pairs))
+    chunks = [pairs[index::BRACKET_WORKERS] for index in range(BRACKET_WORKERS)]
+    predictions = {}
+    with ThreadPoolExecutor(max_workers=BRACKET_WORKERS) as pool:
+        for chunk in pool.map(fetch_chunk, chunks):
+            predictions.update(chunk)
 
-    versions = {tuple(prediction[field] for field in VERSION_FIELDS) for prediction in predictions}
+    versions = {tuple(prediction[field] for field in VERSION_FIELDS)
+                for prediction in predictions.values()}
     if len(versions) != 1:
         raise ValueError("The model or snapshot changed during the bracket prediction.")
-    pair_probabilities = {
-        pair: prediction["team_a_win_probability"]
-        for pair, prediction in zip(pairs, predictions, strict=True)
-    }
-    return bracket_predictions(teams, pair_probabilities), dict(zip(VERSION_FIELDS, versions.pop()))
+    probabilities = {pair: prediction["team_a_win_probability"]
+                     for pair, prediction in predictions.items()}
+    return bracket_predictions(teams, probabilities), dict(zip(VERSION_FIELDS, versions.pop()))
 
 
-def show_bracket(result: BracketPrediction, label):
-    champion = result.champion
-    st.metric("Most likely champion", label(champion))
-    championship_chance = result.advancement[champion][-1]
-    st.progress(min(1.0, championship_chance), text=f"{championship_chance:.1%} chance to win")
+def show_bracket_outcome(result: BracketPrediction, slots, winner_slot, label):
+    for round_index, (matches, round_slots) in enumerate(zip(result.rounds, slots, strict=True)):
+        for match, slot in zip(matches, round_slots, strict=True):
+            if round_index == 0:
+                winner = escape(label(match.winner))
+                slot.html(
+                    f'<div class="bracket-advances"><strong>{winner} advances</strong>'
+                    f'<span>{match.winner_probability:.1%}</span></div>'
+                )
+                continue
 
-    st.subheader("Projected matchups")
-    st.caption("Each matchup advances its favored team. The advancement table includes all possible matchups.")
-    for column, round_name, matches in zip(st.columns(3), ROUND_NAMES, result.rounds, strict=True):
-        with column:
-            st.markdown(f"**{round_name}**")
-            for match in matches:
-                with st.container(border=True):
-                    st.write(f"{label(match.team_a)} · {match.probability_a:.1%}")
-                    st.write(f"{label(match.team_b)} · {1.0 - match.probability_a:.1%}")
-                    st.caption(f"Advances · {label(match.winner)}")
+            rows = []
+            for team, probability in ((match.team_a, match.probability_a),
+                                      (match.team_b, 1.0 - match.probability_a)):
+                style = "bracket-team bracket-winner" if team == match.winner else "bracket-team"
+                rows.append(f'<div class="{style}"><span>{escape(label(team))}</span>'
+                            f'<span>{probability:.1%}</span></div>')
+            slot.html("".join(rows))
 
-    st.subheader("Advancement probabilities")
-    ordered = sorted(result.advancement, key=lambda team: result.advancement[team][-1], reverse=True)
-    rows = []
-    for team in ordered:
-        semi, final, win = result.advancement[team]
-        rows.append({
-            "Team": label(team),
-            "Reach semifinals": semi,
-            "Reach final": final,
-            "Win championship": win,
-        })
+    winner_slot.html(f'<strong class="bracket-champion">{escape(label(result.winner))}</strong>')
+    st.caption(f"Most probable bracket · {result.probability:.2%} chance of this exact outcome")
+
+    st.subheader("Championship odds")
+    ordered = sorted(result.championship, key=result.championship.get, reverse=True)
     st.dataframe(
-        rows, hide_index=True,
-        column_config=dict.fromkeys(
-            ("Reach semifinals", "Reach final", "Win championship"),
-            st.column_config.NumberColumn(format="percent"),
-        ),
+        [{"Team": label(team), "Win tournament": result.championship[team]} for team in ordered],
+        hide_index=True,
+        column_config={"Win tournament": st.column_config.NumberColumn(format="percent")},
     )
 
 
@@ -140,40 +161,68 @@ def show_tournament_form(base_url, team_ids, label):
         st.warning("The current snapshot needs eight eligible teams for a tournament.")
         return
 
-    st.write(
-        "Select eight distinct teams in quarterfinal order. "
-        "Quarterfinals 1–2 and 3–4 lead to separate semifinals."
-    )
-    with st.form("tournament"):
-        teams = []
-        columns = st.columns(2)
-        for index in range(BRACKET_SIZE // 2):
-            with columns[index % len(columns)]:
-                st.markdown(f"**Quarterfinal {index + 1}**")
-                for offset, side in enumerate(("First team", "Second team")):
-                    seed = 2 * index + offset
-                    teams.append(st.selectbox(
-                        side, team_ids, index=seed, format_func=label, key=f"bracket_{seed}",
-                    ))
-        submitted = st.form_submit_button("Predict tournament", type="primary")
+    st.html(BRACKET_STYLES)
+    teams = []
+    slots = []
+    with st.form("tournament", border=False):
+        prompt, action = st.columns([3, 1], vertical_alignment="center")
+        prompt.caption("Choose eight distinct teams in the quarterfinal slots.")
+        submitted = action.form_submit_button("Predict tournament", type="primary")
+        feedback = prompt.empty()
+
+        with st.container(key="bracket-board"):
+            columns = st.columns([1.25, 1, 1, 0.75], gap="large")
+            for round_index, (column, name, track) in enumerate(
+                zip(columns[:3], ROUND_NAMES, ("quarter", "semi", "final"), strict=True)
+            ):
+                with column:
+                    st.markdown(f"**{name}**")
+                    round_slots = []
+                    with st.container(key=f"bracket-track-{track}"):
+                        for index in range(BRACKET_SIZE // (2 ** (round_index + 1))):
+                            with st.container(key=f"bracket-card-{track}-{index}", gap=None):
+                                if round_index == 0:
+                                    for offset in range(2):
+                                        seed = 2 * index + offset
+                                        teams.append(st.selectbox(
+                                            f"Quarterfinal {index + 1}, team {offset + 1}",
+                                            team_ids, index=seed, format_func=label,
+                                            key=f"bracket_{seed}", label_visibility="collapsed",
+                                        ))
+                                slot = st.empty()
+                                round_slots.append(slot)
+                                if round_index > 0:
+                                    slot.html('<p class="bracket-placeholder">Awaiting winners</p>')
+                    slots.append(round_slots)
+
+            with columns[-1]:
+                st.markdown("**Champion**")
+                with st.container(key="bracket-track-winner"):
+                    with st.container(key="bracket-card-winner"):
+                        winner_slot = st.empty()
+                        winner_slot.html('<p class="bracket-placeholder">To be decided</p>')
 
     seeds = tuple(teams)
     if submitted:
-        st.session_state.pop("bracket_result", None)
+        st.session_state.pop("tournament_outcome", None)
         if len(set(seeds)) != BRACKET_SIZE:
-            st.warning("Choose eight distinct teams.")
+            feedback.warning("Choose eight distinct teams.")
             return
-        with st.spinner("Calculating bracket probabilities…"):
+        with feedback.container(), st.spinner("Calculating bracket probabilities…"):
             try:
                 result, provenance = fetch_bracket(base_url, seeds)
-            except (requests.RequestException, KeyError, TypeError, ValueError):
-                st.error("The service could not complete the bracket prediction. Try again.")
+            except requests.Timeout:
+                feedback.error("The prediction service timed out after retrying. Try again in a moment.")
                 return
-        st.session_state["bracket_result"] = (base_url, seeds, result, provenance)
+            except (requests.RequestException, KeyError, TypeError, ValueError):
+                feedback.error("The service could not complete the bracket prediction. Try again.")
+                return
+        feedback.empty()
+        st.session_state["tournament_outcome"] = (base_url, seeds, result, provenance)
 
-    saved = st.session_state.get("bracket_result")
+    saved = st.session_state.get("tournament_outcome")
     if saved and saved[:2] == (base_url, seeds):
-        show_bracket(saved[2], label)
+        show_bracket_outcome(saved[2], slots, winner_slot, label)
         show_provenance(saved[3])
 
 

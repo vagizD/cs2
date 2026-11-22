@@ -1,0 +1,174 @@
+.st-key-bracket-board {
+    --slot: 4.55rem;
+    --round-gap: 2.25rem;
+    --half-gap: calc(var(--round-gap) / 2);
+    --wire: color-mix(in srgb, currentColor 29%, transparent);
+    --card-border: color-mix(in srgb, currentColor 16%, transparent);
+    --card-fill: color-mix(in srgb, currentColor 4%, transparent);
+    --accent: var(--st-primary-color, #db514a);
+    width: 100%;
+    max-width: 66rem;
+    overflow-x: auto;
+    padding: 0.25rem 0.25rem 0.4rem;
+}
+
+.st-key-bracket-board [data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap;
+    gap: var(--round-gap);
+    min-width: 45rem;
+}
+
+.st-key-bracket-board [data-testid="stColumn"] {
+    min-width: 0;
+}
+
+.st-key-bracket-board [class*="st-key-bracket-track-"] {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(8, var(--slot));
+    align-items: center;
+    gap: 0;
+}
+
+.st-key-bracket-board [class*="st-key-bracket-track-"] > * {
+    width: 100%;
+    min-width: 0;
+}
+
+.st-key-bracket-track-quarter > :nth-child(1) { grid-row: 1 / span 2; }
+.st-key-bracket-track-quarter > :nth-child(2) { grid-row: 3 / span 2; }
+.st-key-bracket-track-quarter > :nth-child(3) { grid-row: 5 / span 2; }
+.st-key-bracket-track-quarter > :nth-child(4) { grid-row: 7 / span 2; }
+.st-key-bracket-track-semi > :nth-child(1) { grid-row: 2 / span 2; }
+.st-key-bracket-track-semi > :nth-child(2) { grid-row: 6 / span 2; }
+.st-key-bracket-track-final > :first-child,
+.st-key-bracket-track-winner > :first-child { grid-row: 4 / span 2; }
+
+.st-key-bracket-board [class*="st-key-bracket-card-"] {
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.65rem;
+    min-height: 4rem;
+    justify-content: center;
+    gap: 0.3rem;
+    border: 1px solid var(--card-border);
+    border-radius: 0.6rem;
+    background: var(--card-fill);
+}
+
+.st-key-bracket-board [class*="st-key-bracket-card-winner"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.st-key-bracket-board [class*="st-key-bracket-card-"]::before,
+.st-key-bracket-board [class*="st-key-bracket-card-"]::after {
+    position: absolute;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.st-key-bracket-track-quarter {
+    --join: var(--slot);
+}
+
+.st-key-bracket-track-semi {
+    --join: calc(2 * var(--slot));
+}
+
+.st-key-bracket-board :is(
+    .st-key-bracket-card-quarter-0, .st-key-bracket-card-quarter-2, .st-key-bracket-card-semi-0
+)::after {
+    content: "";
+    left: 100%;
+    top: 50%;
+    width: calc(var(--half-gap) + 1px);
+    height: calc(var(--join) + 1px);
+    border-top: 1px solid var(--wire);
+    border-right: 1px solid var(--wire);
+}
+
+.st-key-bracket-board :is(
+    .st-key-bracket-card-quarter-1, .st-key-bracket-card-quarter-3, .st-key-bracket-card-semi-1
+)::after {
+    content: "";
+    left: 100%;
+    bottom: 50%;
+    width: calc(var(--half-gap) + 1px);
+    height: calc(var(--join) + 1px);
+    border-bottom: 1px solid var(--wire);
+    border-right: 1px solid var(--wire);
+}
+
+.st-key-bracket-board :is(
+    .st-key-bracket-card-semi-0, .st-key-bracket-card-semi-1, .st-key-bracket-card-final-0
+)::before {
+    content: "";
+    top: 50%;
+    right: 100%;
+    width: calc(var(--half-gap) + 2px);
+    border-top: 1px solid var(--wire);
+}
+
+.st-key-bracket-board .st-key-bracket-card-winner::before {
+    content: "";
+    top: 50%;
+    right: 100%;
+    width: calc(var(--round-gap) + 2px);
+    border-top: 1px solid var(--wire);
+}
+
+.st-key-bracket-board .bracket-team {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.35rem 0.45rem;
+    border-radius: 0.35rem;
+    font-size: 0.88rem;
+}
+
+.st-key-bracket-board .bracket-team span:first-child,
+.st-key-bracket-board .bracket-advances strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.st-key-bracket-board .bracket-team span:last-child,
+.st-key-bracket-board .bracket-advances span {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.st-key-bracket-board .bracket-team.bracket-winner {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    font-weight: 650;
+}
+
+.st-key-bracket-board .bracket-advances {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    padding-inline: 0.15rem;
+}
+
+.st-key-bracket-board .bracket-placeholder {
+    margin: 0;
+    font-size: 0.88rem;
+    opacity: 0.75;
+}
+
+.st-key-bracket-board .bracket-champion {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 800px) {
+    .st-key-bracket-board {
+        --round-gap: 1.5rem;
+    }
+}

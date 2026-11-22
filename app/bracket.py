@@ -1,7 +1,7 @@
-"""Exact advancement chances and a projected path for an eight-team bracket."""
+"""Exact odds for an eight-team single-elimination bracket."""
 
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import combinations, product
 
 BRACKET_SIZE = 8
 ROUND_NAMES = ("Quarterfinals", "Semifinals", "Final")
@@ -12,20 +12,22 @@ class MatchPrediction:
     team_a: int
     team_b: int
     probability_a: float
+    winner: int
 
     @property
-    def winner(self) -> int:
-        return self.team_a if self.probability_a >= 0.5 else self.team_b
+    def winner_probability(self) -> float:
+        return self.probability_a if self.winner == self.team_a else 1.0 - self.probability_a
 
 
 @dataclass(frozen=True)
 class BracketPrediction:
     rounds: tuple[tuple[MatchPrediction, ...], ...]
-    advancement: dict[int, tuple[float, ...]]
+    probability: float
+    championship: dict[int, float]
 
     @property
-    def champion(self) -> int:
-        return max(self.advancement, key=lambda team: self.advancement[team][-1])
+    def winner(self) -> int:
+        return self.rounds[-1][0].winner
 
 
 def bracket_predictions(
@@ -38,39 +40,31 @@ def bracket_predictions(
         if probability is None or not 0.0 <= probability <= 1.0:
             raise ValueError(f"Missing or invalid win probability for teams {pair}.")
 
-    def probability_for(team: int, opponent: int) -> float:
-        if team < opponent:
-            return pair_probabilities[team, opponent]
-        return 1.0 - pair_probabilities[opponent, team]
+    championship = dict.fromkeys(teams, 0.0)
+    best_probability = -1.0
+    best_rounds = ()
+    # Seven binary results give 128 complete brackets. Later matchups depend on earlier results.
+    for outcomes in product((0, 1), repeat=BRACKET_SIZE - 1):
+        choices = iter(outcomes)
+        remaining = teams
+        probability = 1.0
+        rounds = []
+        for _ in ROUND_NAMES:
+            matches = []
+            for team_a, team_b in zip(remaining[::2], remaining[1::2], strict=True):
+                low, high = sorted((team_a, team_b))
+                chance = pair_probabilities[low, high]
+                probability_a = chance if team_a == low else 1.0 - chance
+                winner = (team_a, team_b)[next(choices)]
+                match = MatchPrediction(team_a, team_b, probability_a, winner)
+                probability *= match.winner_probability
+                matches.append(match)
+            rounds.append(tuple(matches))
+            remaining = tuple(match.winner for match in matches)
 
-    projected_teams = list(teams)
-    possible_teams = [{team: 1.0} for team in teams]
-    rounds = []
-    advancement = {team: [] for team in teams}
-    for _ in ROUND_NAMES:
-        matches = []
-        next_round = []
-        for index in range(0, len(projected_teams), 2):
-            team_a, team_b = projected_teams[index:index + 2]
-            matches.append(MatchPrediction(team_a, team_b, probability_for(team_a, team_b)))
+        championship[remaining[0]] += probability
+        if probability > best_probability:
+            best_probability = probability
+            best_rounds = tuple(rounds)
 
-            left, right = possible_teams[index:index + 2]
-            winners = dict.fromkeys((*left, *right), 0.0)
-            # Separate bracket halves depend on disjoint earlier matches.
-            for team, team_chance in left.items():
-                for opponent, opponent_chance in right.items():
-                    meet = team_chance * opponent_chance
-                    win = probability_for(team, opponent)
-                    winners[team] += meet * win
-                    winners[opponent] += meet * (1.0 - win)
-            next_round.append(winners)
-            for team, chance in winners.items():
-                advancement[team].append(chance)
-
-        rounds.append(tuple(matches))
-        possible_teams = next_round
-        projected_teams = [match.winner for match in matches]
-
-    return BracketPrediction(
-        tuple(rounds), {team: tuple(chances) for team, chances in advancement.items()}
-    )
+    return BracketPrediction(best_rounds, best_probability, championship)
