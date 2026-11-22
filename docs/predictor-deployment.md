@@ -89,7 +89,7 @@ bash scripts/deploy_api.sh prepare
 bash scripts/deploy_api.sh deploy
 ```
 
-The prepared image persists in the local Docker image store. If the upload is interrupted, rerun only `deploy`. The script uses the same tag for the same local image and checks Artifact Registry for the digest before pushing. Image preparation uses cached dependencies when available. A cold Docker cache needs network access to fetch dependencies.
+The prepared image persists in the local Docker image store. If the upload is interrupted, rerun only `deploy`. The script uses the same tag for the same local image and checks Artifact Registry for the digest before pushing. Image preparation uses cached dependencies when available. A cold Docker cache needs network access to fetch dependencies. If an earlier run pushed the image under a different tag, set `GCP_EXISTING_IMAGE_DIGEST` to its registry digest. The script compares the registry image configuration digest against the prepared image before reusing it.
 
 Record the verified API URL and snapshot URI in the README. If the account requires a separate review, share the GCS object URI and manifest with the reviewer using approved bucket read access.
 

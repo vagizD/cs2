@@ -31,7 +31,7 @@ registry_digest() {
 deploy_image() {
     : "${GCP_RUN_SERVICE_ACCOUNT:?Set GCP_RUN_SERVICE_ACCOUNT to the Cloud Run service identity}"
 
-    local image_id ref digest url
+    local image_id ref digest registry_image_id url
     if ! image_id="$(docker image inspect "$prepared_image" --format '{{.Id}}')"; then
         printf 'Prepare the serving image first with bash scripts/deploy_api.sh prepare.\n' >&2
         return 1
@@ -41,17 +41,34 @@ deploy_image() {
         return 1
     fi
 
-    ref="$image:sha-${image_id#sha256:}"
-    printf 'Checking whether %s is already in Artifact Registry.\n' "$ref"
-    if ! digest="$(registry_digest "$ref" 2>/dev/null)" || [[ -z "$digest" ]]; then
-        gcloud auth configure-docker "$host" --quiet
-        docker image tag "$image_id" "$ref"
-        printf 'Uploading the prepared image to Artifact Registry.\n'
-        docker image push "$ref"
-        digest="$(registry_digest "$ref")"
+    digest="${GCP_EXISTING_IMAGE_DIGEST:-}"
+    if [[ -n "$digest" ]]; then
+        if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf 'GCP_EXISTING_IMAGE_DIGEST must be a SHA-256 image digest.\n' >&2
+            return 1
+        fi
+        registry_image_id="$(docker buildx imagetools inspect "$image@$digest" --raw |
+            "$python_bin" -c 'import json, sys; print(json.load(sys.stdin)["config"]["digest"])')"
+        if [[ "$registry_image_id" == "$image_id" ]]; then
+            printf 'Using the verified image already in Artifact Registry.\n'
+        else
+            digest=""
+        fi
+    fi
+
+    if [[ -z "$digest" ]]; then
+        ref="$image:sha-${image_id#sha256:}"
+        printf 'Checking whether %s is already in Artifact Registry.\n' "$ref"
+        if ! digest="$(registry_digest "$ref" 2>/dev/null)" || [[ -z "$digest" ]]; then
+            gcloud auth configure-docker "$host" --quiet
+            docker image tag "$image_id" "$ref"
+            printf 'Uploading the prepared image to Artifact Registry.\n'
+            docker image push "$ref"
+            digest="$(registry_digest "$ref")"
+        fi
     fi
     if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-        printf 'Artifact Registry did not return a valid image digest for %s.\n' "$ref" >&2
+        printf 'Artifact Registry did not return a valid image digest.\n' >&2
         return 1
     fi
 
