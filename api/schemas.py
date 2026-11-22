@@ -40,5 +40,7 @@ class Health(BaseModel):
     data_snapshot_version: str | None = None
     data_snapshot_sha256: str | None = None
     training_snapshot_version: str | None = None
+    training_git_commit: str | None = None
+    mlflow_run_id: str | None = None
     as_of_utc: AwareDatetime | None = None
     detail: str | None = None

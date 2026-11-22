@@ -69,6 +69,8 @@ The baseline uses differences in each team's last previous ranking and points, p
 
 Inference uses the later of one second after the last finalized match's start and midnight UTC following the latest ranking date. The team list requires five completed matches in the short lookback and caps the list at 60. Historical match results are indexed in SQLite TEMP tables on read-only connections. Missing rankings and win rates remain missing until the stored pipeline imputes them.
 
+For cloud training and shared experiment tracking, use the [Cloud Run release workflow](docs/cloud-mlops.md) with a Git branch and snapshot version.
+
 ### Tests
 
 ```bash

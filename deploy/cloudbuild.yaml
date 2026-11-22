@@ -1,0 +1,51 @@
+# Submit with scripts/release_cloud.sh after provisioning the release identities.
+steps:
+  - id: checkout
+    name: gcr.io/cloud-builders/git
+    entrypoint: bash
+    env:
+      - TARGET_BRANCH=${_BRANCH}
+    args:
+      - -ceu
+      - |
+        git init /workspace/source
+        cd /workspace/source
+        git remote add origin https://github.com/vagizD/cs2.git
+        git fetch --depth 1 origin "refs/heads/$$TARGET_BRANCH"
+        git checkout --detach FETCH_HEAD
+        git rev-parse HEAD | tee /workspace/commit
+  - id: build-images
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    dir: source
+    env:
+      - IMAGE_ROOT=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}
+      - RELEASE=$BUILD_ID
+    args:
+      - -ceu
+      - |
+        commit="$$(cat /workspace/commit)"
+        for target in cloud-training cloud-serving; do
+            image="$$IMAGE_ROOT/$$target:$$RELEASE"
+            docker build --target "$$target" --tag "$$image" \
+              --label "org.opencontainers.image.revision=$$commit" \
+              --build-arg "GIT_COMMIT=$$commit" .
+            docker push "$$image"
+        done
+  - id: train-and-release
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    dir: source
+    env:
+      - GCP_PROJECT=$PROJECT_ID
+      - GCP_REGION=${_REGION}
+      - GCP_ARTIFACT_REPOSITORY=${_REPOSITORY}
+      - RELEASE=$BUILD_ID
+      - SNAPSHOT_VERSION=${_SNAPSHOT_VERSION}
+      - GCS_URI=gs://${_SNAPSHOT_BUCKET}/snapshots/${_SNAPSHOT_VERSION}/hltv_database.db
+      - MODEL_BUNDLE_URI=gs://${_RELEASE_BUCKET}/releases/$BUILD_ID/model.zip
+      - MLFLOW_TRACKING_URI=${_MLFLOW_URL}
+    args: [scripts/cloud_build_release.sh]
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1800s
