@@ -39,3 +39,34 @@ def temporal_db(tmp_path):
             (9, "2025-11-01 13:00:00", 4494, 7020, 0, 2),
         ])
     return path
+
+
+@pytest.fixture(scope="session")
+def trained(tmp_path_factory):
+    from pathlib import Path
+
+    import mlflow
+
+    from ml.build_dataset import build_dataset
+    from ml.config import load_config
+    from ml.snapshot import inspect_snapshot
+    from ml.train import train
+
+    bundled_db = Path("data/processed/hltv_database.db")
+    if not bundled_db.is_file():
+        pytest.skip("Bundled SQLite snapshot is absent.")
+    root = tmp_path_factory.mktemp("trained")
+    defaults = load_config()
+    config = defaults.model_copy(update={
+        "artifacts_dir": root / "artifacts",
+        "mlflow": defaults.mlflow.model_copy(update={
+            "tracking_uri": f"sqlite:///{root / 'mlflow.db'}",
+        }),
+    })
+    snapshot = inspect_snapshot(bundled_db, config.data.snapshot_version)
+    first = build_dataset(config, bundled_db, snapshot)
+    mlflow.MlflowClient(tracking_uri=config.mlflow.tracking_uri).create_experiment(
+        config.mlflow.experiment_name, artifact_location=(root / "mlruns").as_uri()
+    )
+    report = train(config)
+    return config, snapshot, first, report

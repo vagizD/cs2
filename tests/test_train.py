@@ -8,7 +8,6 @@ from ml.build_dataset import build_dataset
 from ml.config import load_config
 from ml.features import feature_matrix
 from ml.model_artifact import load_model
-from ml.snapshot import inspect_snapshot
 from ml.train import chronological_split, read_dataset, train
 
 BUNDLED_DB = Path("data/processed/hltv_database.db")
@@ -25,27 +24,6 @@ def test_chronological_split_groups_identical_timestamps():
     assert validation["as_of_utc"].max() < test["as_of_utc"].min()
     assert pd.concat(splits.values())["example_id"].is_unique
     assert sum(map(len, splits.values())) == len(frame)
-
-
-@pytest.fixture(scope="session")
-def trained(tmp_path_factory):
-    if not BUNDLED_DB.is_file():
-        pytest.skip("Bundled SQLite snapshot is absent.")
-    root = tmp_path_factory.mktemp("trained")
-    defaults = load_config()
-    config = defaults.model_copy(update={
-        "artifacts_dir": root / "artifacts",
-        "mlflow": defaults.mlflow.model_copy(update={
-            "tracking_uri": f"sqlite:///{root / 'mlflow.db'}",
-        }),
-    })
-    snapshot = inspect_snapshot(BUNDLED_DB, config.data.snapshot_version)
-    first = build_dataset(config, BUNDLED_DB, snapshot)
-    mlflow.MlflowClient(tracking_uri=config.mlflow.tracking_uri).create_experiment(
-        config.mlflow.experiment_name, artifact_location=(root / "mlruns").as_uri()
-    )
-    report = train(config)
-    return config, snapshot, first, report
 
 
 def test_reproducible_tracking_and_export(trained):
