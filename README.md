@@ -11,7 +11,7 @@
 
 From cached HLTV pages to a relational database, reproducible event-study figures, team case studies, and presentation-ready storytelling.
 
-[Open the final deck](#final-submission-deck) · [Explore the findings](#key-findings) · [Run the analysis](#quick-start) · [Understand the method](#methodology)
+[Try the match predictor](#cs2-match-predictor) · [Open the final deck](#final-submission-deck) · [Explore the findings](#key-findings) · [Run the analysis](#quick-start) · [Understand the method](#methodology)
 
 </div>
 
@@ -19,6 +19,113 @@ From cached HLTV pages to a relational database, reproducible event-study figure
 
 > [!IMPORTANT]
 > **Final submission:** [`presentation/presentation.html`](presentation/presentation.html) is the finished presentation deck. It contains 13 core slides and 2 appendix slides designed for an 8-minute classroom presentation. The other files under `presentation/` are supporting or legacy materials, not alternate final submissions.
+
+## CS2 match predictor
+
+Select two teams in Streamlit to obtain win probabilities from the separately running FastAPI service. The service uses a fitted scikit-learn pipeline and the same point-in-time SQLite feature SQL used during training.
+
+### Local end-to-end run
+
+The predictor uses Python 3.12 and a separate dependency set from the original roster study. Run these commands from the repository root on `dev`.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements/training.txt -r app/requirements.txt
+
+python -m ml.build_dataset --config config.yaml --source local
+python -m ml.train --config config.yaml
+python -m uvicorn api.main:app --host 127.0.0.1 --port "${PORT:-8080}"
+```
+
+In a second terminal with the environment activated, verify the API and start Streamlit.
+
+```bash
+python -m scripts.smoke_api http://127.0.0.1:8080 --team-ids 4494 9565
+curl --fail http://127.0.0.1:8080/predict \
+  -H 'Content-Type: application/json' \
+  --data '{"team_a_id":4494,"team_b_id":9565}'
+
+API_BASE_URL=http://127.0.0.1:8080 python -m streamlit run app/streamlit_app.py
+```
+
+The example uses MOUZ (4494) and Vitality (9565). `GET /teams` supplies the current IDs and names. `GET /health` reports readiness, model version, training and serving data versions, and the frozen data cutoff. `POST /predict` takes two distinct eligible IDs and returns complementary probabilities in the requested order. The API omits a match format input.
+
+### Reproducibility and tracking
+
+The local run uses `hltv-2026-09-08`, the bundled [HLTV](https://www.hltv.org/) SQLite snapshot with SHA-256 `9dc4989cba70c3d78ca650925fb7db625004784b8a6d9859d9818a05abf5fa00`. For the cloud workflow, use the exact versioned GCS object URI and follow the [GCS and deployment runbook](docs/predictor-deployment.md). Public API and frontend URLs are pending deployment and verification.
+
+- `artifacts/dataset` contains the deterministic feature CSV and its schema, checksum, and snapshot manifest.
+- `artifacts/model` contains a reloadable fitted pipeline and JSON metadata. The model loads without an MLflow server. Use pipeline artifacts from trusted training runs.
+- MLflow uses `mlflow.db` and `mlruns/` by default. Run `mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000` and open the local UI to inspect parameters, the resolved config, split boundaries and balance, model exports, and confusion matrices.
+
+The baseline uses differences in each team's last previous ranking and points, plus each team's match counts and win rates over 30 and 90 days. Match timestamps are UTC start times. Rankings must come from strictly earlier dates. Scores are eligible only when consistent with a completed series. Team order uses ascending IDs, and the target is a win by the lower-ID team. Median imputation and scaling are fitted only on training rows. Whole timestamps stay in one chronological split. The fixed logistic regression configuration is evaluated on validation and held-out test rows.
+
+| Split | Matches | Canonical A wins | Canonical B wins | Accuracy | ROC-AUC | Log loss | Brier |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Training | 11,668 | 6,454 | 5,214 | — | — | — | — |
+| Validation | 2,500 | 1,365 | 1,135 | 0.648 | 0.690 | 0.631 | 0.221 |
+| Test | 2,501 | 1,388 | 1,113 | 0.650 | 0.702 | 0.625 | 0.218 |
+
+Inference uses the later of one second after the last finalized match's start and midnight UTC following the latest ranking date. The team list requires five completed matches in the short lookback and caps the list at 60. Historical match results are indexed in SQLite TEMP tables on read-only connections. Missing rankings and win rates remain missing until the stored pipeline imputes them.
+
+### Tests
+
+```bash
+python -m pip install -r requirements/training.txt -r requirements/test.in
+python -m pytest -q
+```
+
+The local suite covers the bundled snapshot, temporal features, orientation, deterministic rebuild and retraining, MLflow artifacts, mocked GCS transfers, API validation, and a real HTTP call from Streamlit. The read-only GCS integration test runs when `CS2_GCS_TEST_URI` and Application Default Credentials are available.
+
+### Docker smoke test
+
+Train in Docker and persist the dataset, export, and tracking state.
+
+```bash
+docker build --target training --build-arg GIT_COMMIT="$(git rev-parse HEAD)" \
+  -t cs2-predictor-training .
+mkdir -p artifacts/docker-local/mlruns
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/artifacts/docker-local:/app/artifacts" \
+  -v "$PWD/artifacts/docker-local/mlruns:/app/mlruns" \
+  -e MLFLOW_TRACKING_URI=sqlite:////app/artifacts/mlflow.db cs2-predictor-training \
+  sh -ec 'python -m ml.build_dataset --source local && python -m ml.train'
+```
+
+Stage the Docker-trained export, then build and serve the runtime image.
+
+```bash
+MODEL_PATH="$PWD/artifacts/docker-local/model" python -m scripts.stage_serving
+docker build --target serving -t cs2-predictor-serving .
+docker run --rm --read-only --tmpfs /tmp -p 127.0.0.1:8080:8080 cs2-predictor-serving
+```
+
+In a separate terminal, run the HTTP smoke test against the container.
+
+```bash
+python -m scripts.smoke_api http://127.0.0.1:8080 --wait-seconds 20 --team-ids 4494 9565
+```
+
+### Configuration
+
+Use `config.yaml` for the seed, split fractions, model settings, two lookback windows, GCS paths, and team eligibility. Paths are resolved relative to the working directory. CLI commands accept `--config`. The API and deployment script accept `CONFIG_PATH`.
+
+| Environment variable | Override |
+| --- | --- |
+| `DATABASE_PATH` | Input SQLite path, or download destination for GCS commands |
+| `GCS_URI` | Exact `gs://BUCKET/snapshots/VERSION/hltv_database.db` URI |
+| `SNAPSHOT_VERSION` | Immutable snapshot version |
+| `ARTIFACTS_DIR` | Dataset output and default model directory parent |
+| `MODEL_PATH` | Model artifact directory for training export or serving |
+| `MLFLOW_TRACKING_URI` | MLflow backend, default `sqlite:///mlflow.db` |
+| `GIT_COMMIT` | Build commit passed into the training image |
+| `PORT` | Container listener, default 8080 |
+| `API_BASE_URL` | FastAPI URL for Streamlit. Can also be set in Streamlit secrets |
+
+### Data limitations and attribution
+
+This is an educational baseline. Calibration and accuracy can shift with new events, roster changes, and underrepresented teams. The source reflects the original study's coverage and has match start times without result-publication times. Earlier overlapping matches may introduce timing bias. The app serves estimates from a frozen SQLite snapshot. Review the [data audit](docs/predictor-data-audit.md) and [HLTV terms](https://www.hltv.org/terms) before redistributing or publishing a deployment.
 
 ## Research question
 

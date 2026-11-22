@@ -1,0 +1,6 @@
+-r runtime.in
+google-cloud-storage==3.5.0
+matplotlib==3.10.7
+mlflow==3.5.1
+
+requests==2.32.5

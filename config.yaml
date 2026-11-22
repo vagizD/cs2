@@ -1,0 +1,24 @@
+project:
+  name: cs2-match-predictor
+  random_seed: 42
+data:
+  local_db_path: data/processed/hltv_database.db
+  gcs_db_path: artifacts/snapshot/hltv_database.db
+  gcs_uri: null
+  snapshot_version: hltv-2026-09-08
+  lookback_days: [30, 90]
+split:
+  train_fraction: 0.70
+  val_fraction: 0.15
+  test_fraction: 0.15
+model:
+  kind: logistic_regression
+  max_iter: 1000
+  c: 1.0
+mlflow:
+  experiment_name: cs2-match-predictor
+  tracking_uri: sqlite:///mlflow.db
+api:
+  minimum_matches: 5
+  team_limit: 60
+artifacts_dir: artifacts

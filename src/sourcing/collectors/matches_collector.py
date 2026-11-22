@@ -39,10 +39,8 @@ class MatchesCollector:
 
             try:
                 html = self.client.get_html(url, cache_path)
-                parsed_res = MatchesParser.parse_match_html(html, match_id=match_id)
-                if parsed_res:
-                    match_obj, map_stats_ids = parsed_res
-
+                match_obj, map_stats_ids, _, _ = MatchesParser.parse_match_html(html, match_id=match_id)
+                if match_obj is not None:
                     # Filter by cohort if provided
                     if cohort_team_ids is not None:
                         is_cohort = (match_obj.team1_id in cohort_team_ids) or (match_obj.team2_id in cohort_team_ids)

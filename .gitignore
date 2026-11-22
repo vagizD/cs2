@@ -29,3 +29,13 @@ data/logs/
 # Temporary test databases
 data/processed/test*.db
 data/processed/*_test.db
+
+# Predictor models, data downloads, and local tracking state
+/artifacts/
+/mlruns/
+/mlartifacts/
+/mlflow.db*
+/.streamlit/secrets.toml
+/app/.streamlit/secrets.toml
+/.env
+/.pytest_cache/

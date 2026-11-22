@@ -26,7 +26,7 @@ class StatsCollector:
 
             try:
                 html = self.client.get_html(url, cache_path)
-                map_res, player_stats = StatsParser.parse_map_stats_html(html, map_stats_id=ms_id)
+                map_res, player_stats, _ = StatsParser.parse_map_stats_html(html, map_stats_id=ms_id)
 
                 if map_res:
                     self.storage.save_map_result(map_res)
