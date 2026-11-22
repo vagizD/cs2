@@ -38,10 +38,16 @@ def build_dataset(config: Config, path: Path, snapshot: Snapshot) -> dict:
 
 def main() -> None:
     parser = config_parser("Build point-in-time CS2 training features.")
+    parser.add_argument("--source", choices=("local", "gcs"), default="local")
     args = parser.parse_args()
     config = load_config(args.config)
-    path = database_path(config)
-    snapshot = open_snapshot(path, config.data.snapshot_version)
+    path = database_path(config, args.source)
+    if args.source == "gcs":
+        from ml.gcs import download_snapshot
+
+        snapshot = download_snapshot(path, config.data.gcs_uri, config.data.snapshot_version)
+    else:
+        snapshot = open_snapshot(path, config.data.snapshot_version)
     result = build_dataset(config, path, snapshot)
     print(f"Built {result['rows']} examples (SHA-256 {result['features_sha256']}).")
 
