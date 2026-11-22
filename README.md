@@ -51,6 +51,8 @@ API_BASE_URL=http://127.0.0.1:8080 python -m streamlit run app/streamlit_app.py
 
 The example uses MOUZ (4494) and Vitality (9565). `GET /teams` supplies the current IDs and names. `GET /health` reports readiness, model version, training and serving data versions, and the frozen data cutoff. `POST /predict` takes two distinct eligible IDs and returns complementary probabilities in the requested order. The API omits a match format input.
 
+For a tournament, open the **Tournament bracket** tab and enter eight teams in quarterfinal order. Select **Predict tournament** to see the projected quarterfinals, semifinals, and final. The advancement table combines every possible matchup to estimate each team's chances of reaching the semifinals, reaching the final, and winning the championship.
+
 ### Reproducibility and tracking
 
 The local run uses `hltv-2026-09-08`, the bundled [HLTV](https://www.hltv.org/) SQLite snapshot with SHA-256 `9dc4989cba70c3d78ca650925fb7db625004784b8a6d9859d9818a05abf5fa00`. For the cloud workflow, use the exact versioned GCS object URI and follow the [GCS and deployment runbook](docs/predictor-deployment.md). Public API and frontend URLs are pending deployment and verification.
