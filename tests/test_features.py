@@ -54,3 +54,25 @@ def test_bundled_snapshot_and_sql_smoke():
     assert examples["example_id"].is_unique
     assert examples["as_of_utc"].is_monotonic_increasing
     assert examples["team_a_won"].isin([0, 1]).all()
+
+def test_inference_batch_preserves_pair_order(temporal_db):
+    pairs = [(9565, 4494), (7020, 4494), (7020, 9565), (4494, 9565)]
+    timestamp = "2026-01-10 13:00:00"
+    batch = inference_examples(temporal_db, pairs, timestamp, (30, 90))
+
+    assert batch["example_id"].tolist() == [-1, -2, -3, -4]
+    assert list(batch[["team_a_id", "team_b_id"]].itertuples(index=False, name=None)) == [
+        tuple(sorted(pair)) for pair in pairs
+    ]
+    for index, pair in enumerate(pairs):
+        single = inference_examples(temporal_db, [pair], timestamp, (30, 90))
+        pd.testing.assert_frame_equal(
+            feature_matrix(batch.iloc[[index]]).reset_index(drop=True),
+            feature_matrix(single),
+        )
+
+
+def test_inference_empty_batch(temporal_db):
+    batch = inference_examples(temporal_db, [], "2026-01-10 13:00:00", (30, 90))
+    assert batch.empty
+    assert tuple(batch.columns) == CONTEXT_COLUMNS + FEATURE_COLUMNS

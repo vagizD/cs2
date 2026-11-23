@@ -96,7 +96,10 @@ def inference_examples(
         setup_source(conn)
         conn.execute(CREATE_CONTEXT)
         conn.executemany("INSERT INTO prediction_context VALUES (?, ?, ?, ?)", contexts)
-        return extract_features(conn, lookbacks)
+        # SQL sorts negative context IDs ascending; restore the caller's pair order.
+        return extract_features(conn, lookbacks).sort_values(
+            "example_id", ascending=False, ignore_index=True
+        )
 
 
 def available_teams(
