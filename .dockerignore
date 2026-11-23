@@ -4,6 +4,7 @@
 !requirements/
 !requirements/runtime.txt
 !requirements/training.txt
+!requirements/serving-gcs.txt
 !ml/
 !ml/*.py
 !ml/sql/

@@ -46,6 +46,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             data_snapshot_version=predictor.snapshot.snapshot_version,
             data_snapshot_sha256=predictor.snapshot.sha256,
             training_snapshot_version=predictor.metadata.training_snapshot.snapshot_version,
+            training_git_commit=predictor.metadata.git_commit,
+            mlflow_run_id=predictor.metadata.mlflow_run_id,
             as_of_utc=predictor.as_of,
         )
 

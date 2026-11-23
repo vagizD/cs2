@@ -19,18 +19,37 @@ HEALTHCHECK --interval=15s --timeout=4s --start-period=10s \
     CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('PORT', '8080') + '/health', timeout=3).close()"
 CMD ["sh", "-c", "exec python -m uvicorn api.main:app --host 0.0.0.0 --port \"${PORT:-8080}\""]
 
-FROM runtime AS serving
-COPY artifacts/deploy/config.yaml /app/config.yaml
-COPY artifacts/deploy/hltv_database.db artifacts/deploy/hltv_database.db.manifest.json /app/serving-data/
-COPY artifacts/deploy/model/pipeline.joblib artifacts/deploy/model/metadata.json /app/serving-data/model/
+FROM runtime AS cloud-serving
+USER root
+COPY requirements/serving-gcs.txt /tmp/serving-gcs.txt
+RUN python -m pip install --no-cache-dir -r /tmp/serving-gcs.txt
+COPY ml/gcs.py ml/cloud_release.py ./ml/
+ENV ARTIFACTS_DIR=/tmp/cs2-artifacts \
+    DATABASE_PATH=/tmp/cs2-artifacts/snapshot/hltv_database.db
+USER 10001:10001
+CMD ["python", "-m", "ml.cloud_release", "serve"]
 
-FROM base AS training
+FROM base AS training-base
 COPY requirements/training.txt /tmp/training.txt
 RUN python -m pip install --no-cache-dir -r /tmp/training.txt
 COPY config.yaml ./
 COPY ml ./ml
 COPY scripts/download_data.py scripts/upload_snapshot.py ./scripts/
-COPY data/processed/hltv_database.db ./data/processed/
 ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
+
+FROM training-base AS cloud-training
+ENV ARTIFACTS_DIR=/tmp/cs2-artifacts \
+    DATABASE_PATH=/tmp/cs2-artifacts/snapshot/hltv_database.db
+USER 10001:10001
+CMD ["python", "-m", "ml.cloud_release", "train"]
+
+# Keep local-only inputs after both cloud targets for legacy builders.
+FROM runtime AS serving
+COPY artifacts/deploy/config.yaml /app/config.yaml
+COPY artifacts/deploy/hltv_database.db artifacts/deploy/hltv_database.db.manifest.json /app/serving-data/
+COPY artifacts/deploy/model/pipeline.joblib artifacts/deploy/model/metadata.json /app/serving-data/model/
+
+FROM training-base AS training
+COPY data/processed/hltv_database.db ./data/processed/
 CMD ["python", "-m", "ml.train", "--config", "config.yaml"]
