@@ -117,6 +117,8 @@ python -m pytest -q
 
 The suite uses temporary SQLite fixtures, local model training, and mocked cloud storage. It covers temporal features, snapshot integrity, model loading, API validation, bracket probabilities, and Streamlit interactions without requiring Google Cloud credentials. The live endpoint check is separate; use `scripts.smoke_api` as shown above.
 
+Use the [final reproduction and submission checks](docs/submission-checks.md) to record the full suite, clean Docker rebuild, public demo checks, and readable evidence from the deployed model's private MLflow run.
+
 ## Snapshot and cloud releases
 
 The September 8, 2026 snapshot contains 17,821 raw match records. The training set builder retains 16,669 completed series with valid scores. The frozen prediction cutoff is `2026-09-08T13:45:01Z`.
@@ -156,6 +158,8 @@ gcloud run services proxy cs2-mlflow --project "$GCP_PROJECT" --region us-centra
 ```
 
 Open [MLflow on localhost](http://127.0.0.1:5000) and select **cs2-match-predictor**. For one-time provisioning in another project, prepare an Artifact Registry repository, a snapshot bucket, and the initial predictor using `scripts/deploy_api.sh`. Then run `scripts/setup_cloud_mlops.sh` to provision the private tracking service and release identities. The Cloud SQL instance incurs charges while it runs.
+
+For a new project, follow the [fresh-project deployment guide](docs/cloud-setup.md), which covers API enablement, the initial registry and bucket, service identities, the bootstrap API, and frontend configuration.
 
 <details>
 <summary>Deploy a Streamlit code update</summary>
