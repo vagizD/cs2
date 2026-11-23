@@ -92,3 +92,14 @@ def test_tournament_retries_and_renders_a_complete_bracket(streamlit_client):
     assert any("eight distinct" in warning.value for warning in app.warning)
     assert not app.dataframe
     assert requests.count("/predict") == 29
+
+def test_single_match_retries_a_transient_failure(streamlit_client):
+    app, requests, failures = streamlit_client
+    failures.append(503)
+    app.selectbox(key="team_a").set_value(4494)
+    app.selectbox(key="team_b").set_value(9565)
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert len(app.metric) == 2
+    assert requests.count("/predict") == 2

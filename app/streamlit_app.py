@@ -13,7 +13,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 from bracket import BRACKET_SIZE, ROUND_NAMES, BracketPrediction, bracket_predictions
 
-TIMEOUT = (3.05, 10)
+TIMEOUT = (5, 35)
 BRACKET_TIMEOUT = (5, 35)
 BRACKET_WORKERS = 4
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
@@ -35,11 +35,23 @@ def backend_url() -> str:
     return base
 
 
-def request_json(base_url, method, endpoint, *, session=None, timeout=TIMEOUT, **kwargs):
+def request_json(base_url, method, endpoint, *, session=None, timeout=TIMEOUT, retry=False, **kwargs):
     send = session.request if session else requests.request
-    response = send(method, f"{base_url}{endpoint}", timeout=timeout, **kwargs)
-    response.raise_for_status()
-    return response.json()
+    # Team listing and predictions are read-only, so one transient retry is safe.
+    # Bracket requests keep their existing retry in fetch_bracket_matchup.
+    for attempt in range(2 if retry else 1):
+        try:
+            response = send(method, f"{base_url}{endpoint}", timeout=timeout, **kwargs)
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if not retry or attempt or exc.response is None or exc.response.status_code not in RETRYABLE_STATUS:
+                raise
+        except (requests.ConnectionError, requests.Timeout):
+            if not retry or attempt:
+                raise
+        else:
+            return response.json()
+        sleep(0.4)
 
 
 def matchup(base_url, team_a, team_b, **request_options):
@@ -70,7 +82,7 @@ def show_match_form(base_url, team_ids, label):
         return
     with st.spinner("Calculating probabilities…"):
         try:
-            prediction = matchup(base_url, team_a, team_b)
+            prediction = matchup(base_url, team_a, team_b, retry=True)
         except requests.Timeout:
             st.error("The prediction took too long. Try again.")
             return
@@ -237,9 +249,12 @@ def main():
         return
 
     try:
-        teams = request_json(base_url, "GET", "/teams")
+        with st.spinner("Connecting to the prediction service…"):
+            teams = request_json(base_url, "GET", "/teams", retry=True)
     except (requests.RequestException, ValueError):
-        st.error("The prediction service is unavailable. Refresh to try again.")
+        st.error("The prediction service is temporarily unavailable. Try connecting again.")
+        # Clicking a Streamlit button reruns the script and reloads the team list.
+        st.button("Retry connection", type="primary")
         return
 
     if len(teams) < 2:
