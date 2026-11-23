@@ -104,6 +104,19 @@ The check prints JSON with `ready: true`, **43 eligible teams**, and this matchu
 
 You can send other requests in the [local API docs](http://127.0.0.1:8080/docs). For a local Streamlit session, install `app/requirements.txt` in a Python 3.12 virtual environment and run `API_BASE_URL=http://127.0.0.1:8080 python -m streamlit run app/streamlit_app.py`.
 
+## Run the tests
+
+From the repository root, use a Python 3.12 virtual environment:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements/test.in
+python -m pytest -q
+```
+
+The suite uses temporary SQLite fixtures, local model training, and mocked cloud storage. It covers temporal features, snapshot integrity, model loading, API validation, bracket probabilities, and Streamlit interactions without requiring Google Cloud credentials. The live endpoint check is separate; use `scripts.smoke_api` as shown above.
+
 ## Snapshot and cloud releases
 
 The September 8, 2026 snapshot contains 17,821 raw match records. The training set builder retains 16,669 completed series with valid scores. The frozen prediction cutoff is `2026-09-08T13:45:01Z`.
@@ -165,5 +178,13 @@ gcloud run services update cs2-streamlit --project "$GCP_PROJECT" --region "$reg
 ## Limitations and source
 
 The model is an educational baseline trained on frozen HLTV data, with no live roster or match-format inputs. Match start times are available, but result publication times are missing, so earlier matches that overlap a target match can introduce timing bias. Review the terms before collecting or redistributing source data. [HLTV](https://www.hltv.org/) · [HLTV terms](https://www.hltv.org/terms)
+
+### Responsible use
+
+HLTV coverage and the minimum-match eligibility rule can favor active, well-documented teams. Performance may differ for less-represented teams and regions; the aggregate test metrics do not establish equal performance across these groups. The frozen snapshot also cannot reflect later roster changes or shifts in team form.
+
+The displayed percentages are model estimates, not guarantees or betting advice. Small probability differences should not be read as strong evidence that one team will win. Bracket probabilities additionally rely on fixed pairwise probabilities throughout the tournament, so they cannot account for fatigue, adaptation, or new information between rounds.
+
+Use this app to explore a reproducible ML pipeline. Team-level predictions cannot establish why a team wins or loses, or measure an individual player's ability or contribution, and should not drive recruitment, benching, or other consequential decisions about players.
 
 The previous roster dynamics study is archived on the [roster-analysis branch](https://github.com/vagizD/cs2/tree/roster-analysis).
