@@ -2,5 +2,6 @@
 -r ingestion.in
 httpx==0.28.1
 pytest==8.4.2
+sqlalchemy==2.0.44
 
 -r ../app/requirements.txt
