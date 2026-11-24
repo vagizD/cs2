@@ -76,7 +76,7 @@ Built 16669 examples (SHA-256 cb066ad720c4386ea7ac9f383a10ca7628469e9ff589872d50
 | Validation | 2,500 | 0.648400 | 0.689978 | 0.631286 | 0.220501 |
 | Test | 2,501 | 0.649740 | 0.702383 | 0.625437 | 0.217786 |
 
-The report includes the split dates and class counts. The verified Linux AMD64 model version is `logreg-049b8a1dcd903265`. Each training run has its own MLflow run ID. The feature CSV, fitted model, metadata, and local MLflow state are under `artifacts/docker-repro/`.
+The report includes the split dates and class counts. The verified Linux AMD64 model version is `logreg-049b8a1dcd903265`. A `logreg-...` version is derived from the serialized pipeline's SHA-256, so it changes if the model bytes change; different numerical backends can produce small coefficient differences and a different version while preserving the reported metrics and predictions. The MLflow run ID is separate and changes for each training run. The feature CSV, fitted model, metadata, and local MLflow state are under `artifacts/docker-repro/`.
 
 ### 2. Run the prediction API
 
